@@ -19,9 +19,6 @@ var replayHeight = 75;
 var basketWidth = 202;
 var basketHeight = 109;
 
-var characterPlayerWidth = 157;
-var characterPlayerHeight = 166;
-
 var destroyerHeight = 10;
 
 var coinWidth = 50;
@@ -36,22 +33,26 @@ var soundTriggerPadding = 14;
 var maxCoinsPerWave = 10;
 var coinMaxYOnSpawn = 50;
 
-var countDown = 15; //in seconds
-var tenseTimeMark = 5;
+var bombSpawnChance = 2; //out of 10;
+var bombChildrenMax = 4;
+
+var countDown = 16; //in seconds
 var timerLabel = 'Time Left: ';
 
-var gameOverLabel = 'Thanks for playing.\nYou won 100 points.';
+var gameOverLabel_Lose = 'Your score was\nembarrassing.';
+var gameOverLabel_Win1 = 'Congratulations!\nYou won\n';
+var gameOverLabel_Win2 = ' coins!';
 
-var instructionLabel = 'Drag the character\nand catch coins.';
+var instructionLabel = 'Drag the basket\nand catch coins.';
 var instructionCountdown = 2;
 
 /* GLOBAL VARIABLES */
 
 var timedEvent;
 var timerText;
-var timerTextLabel;
 
 var audioBgm;
+var sfxBomb;
 var sfxCoin;
 
 var gameOverText;
@@ -84,36 +85,36 @@ var config = {
 var game = new Phaser.Game(config);
 
 var basketPlayer;
-var charPlayer;
 var coinGroup;
+var bombGroup;
 var destroyerGroup;
 
 function preload ()
 {
-    this.load.image('replay', 'assets/replay.png');
+    this.load.image('replay', 'assets/replay2.png');
+    this.load.image('bomb', 'assets/bomb3.png');
     this.load.image('destroyer', 'assets/block.png');
     this.load.spritesheet('coin', 'assets/coin-sheet.png',
         { frameWidth: coinWidth, frameHeight: coinHeight });
+    this.load.spritesheet('basket', 'assets/basket-sheet.png', 
+        { frameWidth: basketWidth, frameHeight: basketHeight });
 
     this.load.audio('bgm', 'assets/Kevin_MacLeod_Amazing_Plan.mp3');
     this.load.audio('sfxCoinCaught', 'assets/freesound-coin.wav');
+    this.load.audio('sfxBombCaught', 'assets/freesound-fart.wav');
 
     /* SPECIFICS */
     this.load.image('imgBg', 'assets/digi-bg.png');
 
     this.load.spritesheet('audiocontrol', 'assets/audiocontrol-sheet.png', { frameWidth: soundTriggerWidth, frameHeight: soundTriggerHeight });
 
-    this.load.spritesheet('basket', 'assets/basket-sheet.png', 
-        { frameWidth: basketWidth, frameHeight: basketHeight });
-
-    this.load.spritesheet('characterPlayer', 'assets/character-sheet.png', 
-        { frameWidth: characterPlayerWidth, frameHeight: characterPlayerHeight });
-
 }
 
 function create ()
 {
     this.add.image(0, 0, 'imgBg').setOrigin(0, 0);
+
+    bombGroup = this.physics.add.group();
 
     prepareAudio(this);
     prepareDestroyer(this);
@@ -129,27 +130,15 @@ function create ()
 
 function prepareGUIText(preparer) {
     instructionText = preparer.add.text(
-        (screenWidth/9), 
-        ((screenHeight/2) - (screenHeight/9)), 
+        (screenWidth/5), 
+        ((screenHeight/2) - (screenHeight/10)), 
         (instructionLabel), 
         { fontFamily: 'Arial', fontSize: 32, color: '#00ff00', align: 'center' });
 
-    timerTextLabel = preparer.add.text(
-        8, 
-        8, 
-        (timerLabel), 
-        { fontFamily: 'AvenirNext-Bold', fontSize: 16, color: '#fdbb2f' });
-
-    timerText = preparer.add.text(
-        8, 
-        25, 
-        getUpdatedTimeRemaining(), 
-        { fontFamily: 'AvenirNext-Bold', fontSize: 32, color: '#ffffff' });
-
     gameOverText = preparer.add.text(
-        (screenWidth/9), 
-        ((screenHeight/2) - (screenHeight/4)), 
-        (gameOverLabel), 
+        (screenWidth/5), 
+        ((screenHeight/2) - (screenHeight/10)), 
+        (gameOverLabel_Lose), 
         { fontFamily: 'Arial', fontSize: 32, color: '#00ff00', align: 'center' });
 
     gameOverText.visible = false;
@@ -158,6 +147,7 @@ function prepareGUIText(preparer) {
 function prepareAudio(preparer) {
     /* AUDIO */
     sfxCoin = preparer.sound.add('sfxCoinCaught');
+    sfxBomb = preparer.sound.add('sfxBombCaught');
     audioBgm = preparer.sound.add('bgm');
     audioBgm.play();
 }
@@ -183,17 +173,17 @@ function prepareCoins(preparer) {
 }
 
 function prepareColliders(preparer) {
-    preparer.physics.add.collider(charPlayer, destroyerGroup);
-    preparer.physics.add.collider(basketPlayer, charPlayer);
-    // preparer.physics.add.collider(basketPlayer, destroyerGroup);
+    preparer.physics.add.collider(basketPlayer, destroyerGroup);
 
     preparer.physics.add.overlap(destroyerGroup, coinGroup, destroyCoin, null, preparer);
+    preparer.physics.add.overlap(destroyerGroup, bombGroup, destroyBomb, null, preparer);
     preparer.physics.add.overlap(basketPlayer, coinGroup, catchCoin, null, preparer);
+    preparer.physics.add.overlap(basketPlayer, bombGroup, hitBomb, null, preparer);
 }
 
 function prepareDestroyer(preparer) {
     destroyerGroup = preparer.physics.add.staticGroup();
-    var tempHeight = (screenHeight + 15);
+    var tempHeight = (screenHeight);
     for(var x=0; x<screenWidth; x++) {
         destroyerGroup.create(x, tempHeight, 'destroyer');
     }    
@@ -216,9 +206,9 @@ function prepareButtonReplay(preparer) {
 function preparePlayer(preparer) {
     basketPlayer = preparer.physics.add.sprite(
         (screenWidth/2), 
-        (screenHeight - (characterPlayerHeight + (basketHeight/4))),
-        'basket');
-    basketPlayer.body.allowGravity = false;     
+        (screenHeight - basketHeight), 
+        'basket')
+    .setInteractive();
 
     preparer.anims.create({
         key: 'basket0',
@@ -241,54 +231,11 @@ function preparePlayer(preparer) {
         frames: [ { key: 'basket', frame: 4 } ]
     });    
 
-    preparer.anims.create({
-        key: 'charNormal',
-        frames: [ {key: 'characterPlayer', frame: 0 } ]
-    });
-
-    preparer.anims.create({
-        key: 'charDragged',
-        frames: [ {key: 'characterPlayer', frame: 1 } ]
-    });
-    preparer.anims.create({
-        key: 'charDraggedTense',
-        frames: [ {key: 'characterPlayer', frame: 2 } ]
-    });
-
-    charPlayer = preparer.physics.add.sprite(
-        (screenWidth/2), 
-        (screenHeight - (characterPlayerHeight/2)), 
-        'characterPlayer')
-    .setInteractive();
-
-    preparer.input.setDraggable(charPlayer);
+    preparer.input.setDraggable(basketPlayer);
 
     preparer.input.on('drag', function (pointer, gameObject, dragX, dragY) {
         gameObject.x = dragX;
-        basketPlayer.x = dragX;
-
-        charPlayerEmotion_animateDragged();
     });
-
-    preparer.input.on('pointerup', function() {
-        charPlayerEmotion_animateNormal();
-    });
-
-    preparer.input.on('pointerout', function() {
-        charPlayerEmotion_animateNormal();
-    });
-}
-
-function charPlayerEmotion_animateNormal() {
-    charPlayer.anims.play('charNormal', false);
-}
-
-function charPlayerEmotion_animateDragged() {
-    if(timedEvent.repeatCount <= tenseTimeMark) {
-        charPlayer.anims.play('charDraggedTense', false);
-    } else {
-        charPlayer.anims.play('charDragged', false);
-    }
 }
 
 function prepareAudioToggle(preparer) {
@@ -347,7 +294,13 @@ function prepareAudioToggle(preparer) {
 }
 
 function prepareTimer(preparer) {
-    timedEvent = preparer.time.addEvent({ 
+ timerText = preparer.add.text(
+        (screenWidth - (screenWidth/3)), 
+        8, 
+        (timerLabel + countDown), 
+        { fill: '#000', font: '20px Arial' });
+
+ timedEvent = preparer.time.addEvent({ 
             delay: 1000, 
             callback: onCountdownTick, 
             callbackScope: preparer, 
@@ -366,6 +319,7 @@ function unPressSoundTrigger() {
 function toggleSound() {
     audioBgm.mute = isSoundOn;
     sfxCoin.mute = isSoundOn;
+    sfxBomb.mute = isSoundOn;
 
     isSoundOn = !isSoundOn;
 }
@@ -373,25 +327,25 @@ function toggleSound() {
 function animateBasket(basket) {
     var remainingTime = timedEvent.repeatCount;
 
-    if(remainingTime >= 13) {
+    if(remainingTime >= 15) {
         basket.anims.play('basket0', false);
     }
-    else if(remainingTime >= 10) {
+    else if(remainingTime >= 12) {
         basket.anims.play('basket1', false);
     }
-    else if(remainingTime >= 8) {
+    else if(remainingTime >= 10) {
         basket.anims.play('basket2', false);
     }
-    else if(remainingTime >= 4) {
+    else if(remainingTime >= 8) {
         basket.anims.play('basket3', false);
     }
-    else {
+    else if(remainingTime >= 4) {
         basket.anims.play('basket4', false);
     }
 }
 
 function onCountdownTick() {
-    timerText.setText(getUpdatedTimeRemaining());
+    timerText.setText(timerLabel + timedEvent.repeatCount);
 
     if(instructionCountdown > 0) {
         instructionCountdown--;
@@ -399,23 +353,13 @@ function onCountdownTick() {
         instructionText.visible = false;
     }
 
-
-    if(timedEvent.repeatCount == tenseTimeMark) {
+    if(timedEvent.repeatCount == 0) {
         timerText.setColor('#f00');
-    }
-    else if(timedEvent.repeatCount == 0) {
         audioBgm.stop();
+
+        basketPlayer.destroy();
         showGameOverScreen();
     }
-}
-
-function getUpdatedTimeRemaining() {
-    var remainingMinutes = ((timedEvent.repeatCount/60) | 0);
-    var remainingSeconds = (timedEvent.repeatCount >= 60) ? 
-    (timedEvent.repeatCount % 60) : timedEvent.repeatCount;
-    var concatenator = (remainingSeconds >= 10) ? ':' : ':0';
-
-    return (remainingMinutes + concatenator + remainingSeconds);
 }
 
 function catchCoin(basket, coin) {
@@ -424,11 +368,30 @@ function catchCoin(basket, coin) {
 
     animateBasket(basket);
     relocateCoin(coin);
+    plantBomb();
+}
+
+function destroyBomb(destroyerGroup, bomb) {
+    bomb.destroy();
 }
 
 function destroyCoin(destroyerGroup, coin) {
     coin.disableBody(true, true);
     relocateCoin(coin);
+}
+
+function hitBomb(basket, bomb) {
+    bomb.destroy();
+    sfxBomb.play();
+}
+
+function plantBomb() {
+    if((bombGroup.countActive(true) < bombChildrenMax) &&
+        (bombSpawnChance <= Phaser.Math.Between(0, 10))) {
+        var bomb = bombGroup.create(
+            Phaser.Math.Between(0, screenWidth), 
+            0, 'bomb');
+    }
 }
 
 function relocateCoin(coin) {
@@ -444,20 +407,18 @@ function relocateCoin(coin) {
 }
 
 function showGameOverScreen() {
-    basketPlayer.destroy();
-    charPlayer.destroy();
-
     timerText.visible = false;
-    timerTextLabel.visible = false;
+
+    gameOverText.setText(gameOverLabel_Lose);
+    gameOverText.setColor('#F00');
 
     gameOverText.visible = true;
     buttonReplay.visible = true;
-    buttonSoundTrigger.visible = false;
 }
 
 function update ()
 {
-
+   
 }
 
 </script>
